@@ -1,0 +1,15 @@
+{
+  "name": "signed-receipt-reference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Side-effect-only minimal reference: JCS canonicalization, claim lifecycle, signed receipts, external anchor. No framework assumptions, zero dependencies.",
+  "scripts": {
+    "test": "node test/vectors.test.mjs",
+    "demo": "node examples/demo.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
