@@ -54,6 +54,30 @@ const withProto = JSON.parse('{"__proto__":1,"a":1}');
 eq("__proto__ key preserved", canonicalJSON(withProto), '{"__proto__":1,"a":1}');
 check("__proto__ no collision", canonicalJSON(withProto) !== canonicalJSON({ a: 1 }));
 eq("__proto__ nested", canonicalJSON(JSON.parse('{"n":{"__proto__":true}}')), '{"n":{"__proto__":true}}');
+
+// Same collision class, remaining siblings: a Date, Map, Set, RegExp or class
+// instance has no own enumerable properties, so each previously canonicalized
+// to "{}" for EVERY instance — two distinct inputs, identical signed bytes.
+// An array hole likewise emitted "[1,,3]", bytes no JSON parser accepts.
+// All are now hard errors rather than silent collisions.
+for (const [label, v] of [
+  ["Date", new Date(1)],
+  ["Map", new Map([["k", 1]])],
+  ["Set", new Set([1, 2])],
+  ["RegExp", /a\.b/],
+  ["class instance", new (class { constructor() { this.x = 1; } })()],
+]) {
+  await throws(`reject ${label} (was a silent {} collision)`, () => canonicalJSON({ x: v }));
+}
+eq(
+  "Date via explicit ISO conversion still signs",
+  canonicalJSON({ x: new Date(0).toISOString() }),
+  '{"x":"1970-01-01T00:00:00.000Z"}'
+);
+await throws("reject array hole", () => canonicalJSON([1, , 3]));
+eq("array null element is fine", canonicalJSON([1, null, 3]), "[1,null,3]");
+check("distinct timestamps do not collide", canonicalJSON([new Date(1).getTime()]) !== canonicalJSON([new Date(2).getTime()]));
+check("null-prototype plain object accepted", canonicalJSON(Object.assign(Object.create(null), { a: 1 })) === '{"a":1}');
 eq("array order", canonicalJSON([3, 1, 2]), "[3,1,2]");
 eq("no whitespace", canonicalJSON({ a: 1, b: [2, 3] }), '{"a":1,"b":[2,3]}');
 
