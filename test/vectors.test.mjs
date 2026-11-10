@@ -11,7 +11,8 @@ import {
   STATE,
   TRUST,
 } from "../lib/receipt.js";
-import { generateIssuer } from "../lib/keys.js";
+import { generateIssuer, signBytes } from "../lib/keys.js";
+import { paeBytes, RECEIPT_PAYLOAD_TYPE } from "../lib/pae.js";
 import { MemoryAnchor, anchorReceipt, verifyAgainstAnchor, verifyAncestry } from "../lib/anchor.js";
 import { evaluateEffect, KEY_ROOT, EFFECT } from "../lib/effect.js";
 
@@ -30,13 +31,10 @@ function eq(name, got, want) {
 }
 async function throws(name, fn) {
   let threw = false;
-  try {
-    await fn();
-  } catch {
-    threw = true;
-  }
+  try { await fn(); } catch { threw = true; }
   check(name, threw);
 }
+const payloadB64Ok = (s) => /^[A-Za-z0-9+/]+={0,2}$/.test(s);
 
 // ---------------------------------------------------------------------------
 // 1. Canonicalization — independent of any key. MUST pass before signing.
@@ -164,7 +162,8 @@ check("valid receipt verifies", v0.ok, JSON.stringify(v0));
 const tampered = { ...receipt, result_ref: "https://attacker/evil" };
 const v1 = await verifyReceipt(tampered, issuer.publicKey);
 eq("tampered body rejected", v1.ok, false);
-eq("tamper reason", v1.reason, "content_hash mismatch");
+// v2: the B-vs-own-JCS consistency layer fires before the hash check.
+eq("tamper reason", v1.reason, "payload is not its own JCS serialization");
 
 const other = await generateIssuer();
 const forged = await issueReceipt(claim, {
@@ -174,6 +173,51 @@ const forged = await issueReceipt(claim, {
 });
 const v2 = await verifyReceipt(forged, issuer.publicKey);
 eq("foreign signature rejected", v2.ok, false);
+
+// ---------------------------------------------------------------------------
+// 2b. PAE domain separation (v2 receipt format — breaking vs v1, by design).
+//     Decisive properties: a signature binds payloadType AND bytes; the
+//     verifier consumes the TRANSPORTED bytes and never re-derives coverage.
+// ---------------------------------------------------------------------------
+check("receipt carries payload_type", receipt.payload_type === "application/vnd.correctover.receipt.v2+json", receipt.payload_type);
+check("receipt carries payload_b64", typeof receipt.payload_b64 === "string" && payloadB64Ok(receipt.payload_b64));
+
+// (i) Type-swap vector: same receipt, payloadType changed => MUST reject.
+const typeSwapped = { ...receipt, payload_type: "application/other+json" };
+const vts = await verifyReceipt(typeSwapped, issuer.publicKey);
+eq("type-swap rejected", vts.ok, false);
+check("type-swap reason is the format gate", /payload_type/.test(vts.reason), vts.reason);
+
+// (ii) Transplanted-signature vector: same body signed under a DIFFERENT
+//      type, presented with OUR type => MUST reject (PAE differs).
+const evilSig = await signBytes(issuer.privateKey, paeBytes("application/other+json", new Uint8Array(Buffer.from(receipt.payload_b64, "base64"))));
+const transplant = { ...receipt, signature: evilSig };
+const vtp = await verifyReceipt(transplant, issuer.publicKey);
+eq("cross-type transplanted signature rejected", vtp.ok, false);
+
+// (iii) Transported-bytes vector: reorder every key of the transported claim
+//       (payload_b64/signature untouched) => still verifies. The verifier
+//       signs/verifies against payload_b64, never a re-derivation; JCS
+//       determinism keeps the consistency layer green.
+const reordered = {};
+for (const k of Object.keys(receipt).reverse()) reordered[k] = receipt[k];
+const vro = await verifyReceipt(reordered, issuer.publicKey);
+check("reordered JSON still verifies", vro.ok, JSON.stringify(vro));
+
+// (iv) Legacy fail-closed: a v1-style receipt (bare JCS signature, no PAE,
+//      no payload_b64) MUST NOT verify under v2 rules.
+const legacy = { ...receipt };
+delete legacy.payload_type;
+delete legacy.payload_b64;
+delete legacy.signature;
+const legacySig = await signBytes(issuer.privateKey, await (async () => {
+  const { canonicalBytes } = await import("../lib/canonical.js");
+  const { content_hash, payload_type, payload_b64, signature, ...body } = legacy;
+  return canonicalBytes(body);
+})());
+const legacyReceipt = { ...legacy, signature: legacySig };
+const vlg = await verifyReceipt(legacyReceipt, issuer.publicKey);
+eq("legacy bare-JCS receipt rejected", vlg.ok, false);
 
 // ---------------------------------------------------------------------------
 // 3. Replay vs CONFLICT.
