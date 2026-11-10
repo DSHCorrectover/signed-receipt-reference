@@ -220,6 +220,32 @@ const vlg = await verifyReceipt(legacyReceipt, issuer.publicKey);
 eq("legacy bare-JCS receipt rejected", vlg.ok, false);
 
 // ---------------------------------------------------------------------------
+// 2c. Zero-scalar forgery gate: small-order (8-torsion) issuer keys MUST be
+//     rejected before any signature math, regardless of library behavior
+//     (noble 2.4.0/1.4.2 accept ALL of these; see research FINDING.md).
+// ---------------------------------------------------------------------------
+import { isSmallOrderRaw, issuerRawBytes } from "../lib/keys.js";
+const TORSION = [
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "0000000000000000000000000000000000000000000000000000000000000080",
+  "0000000000000000000000000000000000000000000000000000000000000000",
+];
+let smallOrderAllRejected = true;
+for (const hex of TORSION) {
+  const raw = Uint8Array.from(Buffer.from(hex, "hex"));
+  if (!isSmallOrderRaw(raw)) { smallOrderAllRejected = false; break; }
+  const evilKey = await crypto.subtle.importKey("raw", raw, { name: "Ed25519" }, true, ["verify"]);
+  const vr = await verifyReceipt(receipt, evilKey);
+  if (vr.ok || !/small-order/.test(vr.reason)) { smallOrderAllRejected = false; break; }
+}
+check("all 8 torsion issuer keys rejected (zero-scalar gate)", smallOrderAllRejected);
+
+// ---------------------------------------------------------------------------
 // 3. Replay vs CONFLICT.
 // ---------------------------------------------------------------------------
 const sameInputs = { amount: 100, currency: "CNY", to: "acct_7" };
