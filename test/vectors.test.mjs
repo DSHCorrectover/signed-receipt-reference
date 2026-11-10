@@ -45,6 +45,28 @@ async function throws(name, fn) {
 eq("key sort", canonicalJSON({ b: 1, a: 2 }), '{"a":2,"b":1}');
 eq("nested sort", canonicalJSON({ z: { y: 1, x: 2 } }), '{"z":{"x":2,"y":1}}');
 
+// RFC 8785 §3.2.3 orders member names by UTF-16 code unit, so "10" precedes
+// "9" and "" precedes everything. Object.keys() returns integer-index-like keys
+// first in ascending NUMERIC order regardless of insertion order, which used to
+// undo the sort performed in canonical() -- emitting {"9":2,"10":1} and
+// {"0":1,"":"\t"}. Those bytes match no conforming JCS implementation, so a
+// receipt signed here failed verification elsewhere purely on key spelling.
+eq("index-like keys keep code-unit order", canonicalJSON(JSON.parse('{"10":1,"9":2}')), '{"10":1,"9":2}');
+eq("index-like keys, other insertion order", canonicalJSON(JSON.parse('{"9":2,"10":1}')), '{"10":1,"9":2}');
+eq("empty key sorts before index-like key", canonicalJSON(JSON.parse('{"":"\\t","0":1}')), '{"":"\\t","0":1}');
+eq("non-canonical numeric string is a plain key", canonicalJSON(JSON.parse('{"007":1,"21":2}')), '{"007":1,"21":2}');
+eq("punctuation before digits", canonicalJSON(JSON.parse('{"3":1,"-":2}')), '{"-":2,"3":1}');
+eq("past the array-index bound", canonicalJSON(JSON.parse('{"4294967295":1,"4294967294":2}')), '{"4294967294":2,"4294967295":1}');
+check(
+  "output order is independent of insertion order",
+  canonicalJSON({ 5: "x", 3: "y", b: 1 }) === canonicalJSON({ b: 1, 3: "y", 5: "x" })
+);
+// UTF-16 CODE-UNIT order, not code-point order: U+10000 is the pair
+// D800 DC00, and 0xD800 < 0xFFFF, so the astral key sorts BEFORE U+FFFF even
+// though its code point is larger. A code-point sort would silently disagree
+// with every other JCS implementation.
+eq("astral key sorts before U+FFFF", canonicalJSON({ "\u{10000}": 1, "\uffff": 2 }), '{"\u{10000}":1,"\uffff":2}');
+
 // __proto__ regression: a "__proto__" own-property (as produced by
 // JSON.parse) must survive as a regular key. With a plain {} canonical
 // target the Object.prototype setter silently dropped it, and
