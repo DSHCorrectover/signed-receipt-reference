@@ -44,6 +44,16 @@ async function throws(name, fn) {
 
 eq("key sort", canonicalJSON({ b: 1, a: 2 }), '{"a":2,"b":1}');
 eq("nested sort", canonicalJSON({ z: { y: 1, x: 2 } }), '{"z":{"x":2,"y":1}}');
+
+// __proto__ regression: a "__proto__" own-property (as produced by
+// JSON.parse) must survive as a regular key. With a plain {} canonical
+// target the Object.prototype setter silently dropped it, and
+// {"__proto__":1,"a":1} collided with {"a":1} — a signature-layer
+// collision (two distinct inputs, identical signed bytes).
+const withProto = JSON.parse('{"__proto__":1,"a":1}');
+eq("__proto__ key preserved", canonicalJSON(withProto), '{"__proto__":1,"a":1}');
+check("__proto__ no collision", canonicalJSON(withProto) !== canonicalJSON({ a: 1 }));
+eq("__proto__ nested", canonicalJSON(JSON.parse('{"n":{"__proto__":true}}')), '{"n":{"__proto__":true}}');
 eq("array order", canonicalJSON([3, 1, 2]), "[3,1,2]");
 eq("no whitespace", canonicalJSON({ a: 1, b: [2, 3] }), '{"a":1,"b":[2,3]}');
 
