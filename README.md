@@ -1,5 +1,7 @@
 # Signed Receipt — minimal reference
 
+[**Commercial verification engagements — USD 8,000–15,000, court-ready dossier**](https://dshcorrectover.github.io/correctover-recovery-admission/services.html) · [**Independent audit & conformance**](https://dshcorrectover.github.io/correctover-recovery-admission/services.html)
+
 A **side-effect-only**, zero-dependency reference for the evidence layer over
 the existing idempotency model:
 
